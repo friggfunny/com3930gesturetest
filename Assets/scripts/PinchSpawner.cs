@@ -4,18 +4,14 @@ using UnityEngine.XR.Hands;
 public class PinchSpawner : MonoBehaviour
 {
     [Header("Spawning Settings")]
-    [Tooltip("Leave empty to spawn default cubes, or drag a Prefab here.")]
     public GameObject cubePrefab;
 
     private XRHandSubsystem handSubsystem;
-
-    // We track the previous frame's state to prevent spawning 60 cubes a second
     private bool leftWasPinching = false;
     private bool rightWasPinching = false;
 
     void Update()
     {
-        // 1. Hook up to the Hand Subsystem
         if (handSubsystem == null || !handSubsystem.running)
         {
             var subsystems = new System.Collections.Generic.List<XRHandSubsystem>();
@@ -24,7 +20,6 @@ public class PinchSpawner : MonoBehaviour
             return;
         }
 
-        // 2. Check both hands every frame
         CheckHandForPinch(handSubsystem.leftHand, ref leftWasPinching);
         CheckHandForPinch(handSubsystem.rightHand, ref rightWasPinching);
     }
@@ -37,25 +32,35 @@ public class PinchSpawner : MonoBehaviour
             return;
         }
 
-        // Get the joints
+        // Get the required joints
         var thumbTip = hand.GetJoint(XRHandJointID.ThumbTip);
         var indexTip = hand.GetJoint(XRHandJointID.IndexTip);
+        var middleTip = hand.GetJoint(XRHandJointID.MiddleTip); // Used to check for a fist
+        var palm = hand.GetJoint(XRHandJointID.Palm);
 
-        if (thumbTip.TryGetPose(out Pose tPose) && indexTip.TryGetPose(out Pose iPose))
+        if (thumbTip.TryGetPose(out Pose tPose) &&
+            indexTip.TryGetPose(out Pose iPose) &&
+            middleTip.TryGetPose(out Pose mPose) &&
+            palm.TryGetPose(out Pose pPose))
         {
-            // Calculate distance
+            // 1. Check if thumb and index are touching (Pinch)
             float pinchDist = Vector3.Distance(tPose.position, iPose.position);
-            bool isPinching = pinchDist < 0.02f;
+            bool fingersTouching = pinchDist < 0.02f;
 
-            // Trigger ONLY on the exact frame the pinch starts
+            // 2. Check if the middle finger is extended away from the palm
+            // (If it is less than ~0.06m, the hand is likely curled into a fist)
+            float middleToPalmDist = Vector3.Distance(mPose.position, pPose.position);
+            bool handIsOpen = middleToPalmDist > 0.06f;
+
+            // 3. ONLY trigger if fingers are touching AND the hand is open
+            bool isPinching = fingersTouching && handIsOpen;
+
             if (isPinching && !wasPinching)
             {
-                // Spawn the cube exactly between the thumb and index finger
                 Vector3 spawnPosition = Vector3.Lerp(tPose.position, iPose.position, 0.5f);
                 SpawnCube(spawnPosition);
             }
 
-            // Update the state for the next frame
             wasPinching = isPinching;
         }
     }
@@ -66,16 +71,14 @@ public class PinchSpawner : MonoBehaviour
 
         if (cubePrefab != null)
         {
-            // Spawn the custom prefab if you assigned one
             newCube = Instantiate(cubePrefab, position, Quaternion.identity);
         }
         else
         {
-            // Fallback: Create a basic Unity cube, make it small, and add gravity
             newCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             newCube.transform.position = position;
-            newCube.transform.localScale = new Vector3(0.05f, 0.05f, 0.05f); // 5cm cube
-            newCube.AddComponent<Rigidbody>(); // Makes it fall down
+            newCube.transform.localScale = new Vector3(0.05f, 0.05f, 0.05f);
+            newCube.AddComponent<Rigidbody>();
         }
     }
 }
