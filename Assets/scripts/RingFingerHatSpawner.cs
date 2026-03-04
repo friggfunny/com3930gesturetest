@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.Hands;
-using System.Collections.Generic;
+ // Needed to detect grabbable objects
 
 public class RingFingerHatSpawner : MonoBehaviour
 {
@@ -9,14 +9,15 @@ public class RingFingerHatSpawner : MonoBehaviour
     [Tooltip("Drag your TestHat Prefab here.")]
     public GameObject hatPrefab;
 
-    private XRHandSubsystem handSubsystem;
+    [Header("Spawn Prevention")]
+    [Tooltip("How close your hand can be to an existing object before spawning is blocked (in meters).")]
+    public float noSpawnRadius = 0.15f; // 15cm radius
 
-    // We only need to track the left hand's state
+    private XRHandSubsystem handSubsystem;
     private bool wasRingPinching = false;
 
     void Update()
     {
-        // 1. Hook up the Hand Subsystem
         if (handSubsystem == null || !handSubsystem.running)
         {
             var subsystems = new List<XRHandSubsystem>();
@@ -25,7 +26,6 @@ public class RingFingerHatSpawner : MonoBehaviour
             return;
         }
 
-        // 2. ONLY check the left hand
         CheckLeftHandForRingPinch(handSubsystem.leftHand);
     }
 
@@ -37,33 +37,56 @@ public class RingFingerHatSpawner : MonoBehaviour
             return;
         }
 
-        // Get Thumb and Ring Finger tips
         var thumbTip = hand.GetJoint(XRHandJointID.ThumbTip);
         var ringTip = hand.GetJoint(XRHandJointID.RingTip);
 
         if (thumbTip.TryGetPose(out Pose tPose) && ringTip.TryGetPose(out Pose rPose))
         {
-            // Calculate distance between thumb and ring finger
             float pinchDist = Vector3.Distance(tPose.position, rPose.position);
             bool isRingPinching = pinchDist < 0.02f;
 
-            // Trigger ONLY on the exact frame the pinch starts
             if (isRingPinching && !wasRingPinching)
             {
-                // Spawn the hat exactly between the thumb and ring finger
                 Vector3 spawnPosition = Vector3.Lerp(tPose.position, rPose.position, 0.5f);
-                SpawnHat(spawnPosition);
+
+                // NEW: Check if the area is clear before spawning
+                if (IsSpawnAreaClear(spawnPosition))
+                {
+                    SpawnHat(spawnPosition);
+                }
+                else
+                {
+                    Debug.Log("Hat spawn blocked: Hand is too close to an existing grabbable object!");
+                }
             }
 
             wasRingPinching = isRingPinching;
         }
     }
 
+    bool IsSpawnAreaClear(Vector3 checkPosition)
+    {
+        // Draw an invisible bubble at the pinch location
+        Collider[] hitColliders = Physics.OverlapSphere(checkPosition, noSpawnRadius);
+
+        foreach (var hitCollider in hitColliders)
+        {
+            // If the collider (or its parent) has an XRGrabInteractable, it's a grabbable object!
+            var grabbable = hitCollider.GetComponentInParent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();
+
+            if (grabbable != null)
+            {
+                return false; // Area is NOT clear. Block the spawn.
+            }
+        }
+
+        return true; // No grabbable objects found. Clear to spawn!
+    }
+
     void SpawnHat(Vector3 position)
     {
         if (hatPrefab != null)
         {
-            // Spawn the hat upright
             Instantiate(hatPrefab, position, Quaternion.identity);
         }
         else
